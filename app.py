@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
-
+from football_api import fetch_events_today, build_scores_message, build_results_message
 from database import SessionLocal, User
 from whatsapp import send_message
 from football_api import (
@@ -178,3 +178,4 @@ def menu(auto_enabled: bool, selected_codes) -> str:
         "• my leagues — show your list\n"
         "• reset leagues — back to ALL\n"
     )
+
