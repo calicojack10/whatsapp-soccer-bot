@@ -1,23 +1,26 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from database import Session, User
+
+from database import SessionLocal, User
 from football_api import live_scores
 from whatsapp import send_message
 
 
 def send_auto_updates():
-    db = Session()
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.auto_updates == True).all()
+        if not users:
+            return
 
-    users = db.query(User).filter(User.auto_updates == True).all()
+        scores_text = live_scores()
 
-    if not users:
-        return
+        for user in users:
+            send_message(user.phone, scores_text)
 
-    scores = live_scores()
-
-    for user in users:
-        send_message(user.phone, scores)
+    finally:
+        db.close()
 
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(send_auto_updates, "interval", minutes=5)
+scheduler.add_job(send_auto_updates, "interval", minutes=5, max_instances=1)
 scheduler.start()
