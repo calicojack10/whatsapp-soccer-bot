@@ -15,9 +15,6 @@ VERIFY_TOKEN = "live_ball"  # must match Meta dashboard
 # WEBHOOK VERIFICATION (GET)
 # =========================
 
-
-VERIFY_TOKEN = "live_ball"
-
 @app.get("/webhook")
 async def verify_webhook(
     hub_mode: str = None,
@@ -87,4 +84,5 @@ auto on - automatic updates
 auto off - stop updates
 
 """
+
 
