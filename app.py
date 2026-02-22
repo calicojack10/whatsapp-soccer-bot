@@ -32,14 +32,19 @@ async def verify_webhook(
 # =========================
 @app.post("/webhook")
 async def webhook(req: Request):
-    data = await req.json()
 
+    try:
+        data = await req.json()
+    except:
+        return {"status": "no json"}
+
+    # ✅ Ignore non-message events safely
     try:
         message = data["entry"][0]["changes"][0]["value"]["messages"][0]
         phone = message["from"]
         text = message["text"]["body"].lower()
-    except:
-        return {"status": "no message"}
+    except (KeyError, IndexError, TypeError):
+        return {"status": "no message event"}
 
     db = Session()
     user = db.get(User, phone)
@@ -49,7 +54,6 @@ async def webhook(req: Request):
         db.add(user)
         db.commit()
 
-    # COMMANDS
     if text == "menu":
         send_message(phone, menu())
 
@@ -84,5 +88,6 @@ auto on - automatic updates
 auto off - stop updates
 
 """
+
 
 
