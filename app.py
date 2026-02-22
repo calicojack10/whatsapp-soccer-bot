@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from database import Session, User
 from whatsapp import send_message
 from football_api import live_scores
+from fastapi.responses import PlainTextResponse
 import scheduler
 import os
 
@@ -13,6 +14,10 @@ VERIFY_TOKEN = "live_ball"  # must match Meta dashboard
 # =========================
 # WEBHOOK VERIFICATION (GET)
 # =========================
+
+
+VERIFY_TOKEN = "live_ball"
+
 @app.get("/webhook")
 async def verify_webhook(
     hub_mode: str = None,
@@ -20,8 +25,9 @@ async def verify_webhook(
     hub_verify_token: str = None,
 ):
     if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        return int(hub_challenge)
-    return {"error": "Verification failed"}
+        return PlainTextResponse(hub_challenge)
+
+    return PlainTextResponse("Verification failed", status_code=403)
 
 
 # =========================
@@ -81,3 +87,4 @@ auto on - automatic updates
 auto off - stop updates
 
 """
+
