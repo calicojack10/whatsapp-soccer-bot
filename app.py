@@ -101,6 +101,20 @@ async def webhook(req: Request):
             except Exception:
                 send_message(phone, "⚠️ Could not fetch scores right now. Try again in a minute.")
 
+        elif text == "results":
+            try:
+                events = fetch_events_today()
+                send_message(phone, build_results_message(events, selected_codes=selected))
+            except Exception:
+        send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
+
+        elif text == "results all":
+            try:
+                events = fetch_events_today()
+                send_message(phone, build_results_message(events, selected_codes=[]))
+            except Exception:
+                send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
+
         elif text in ("auto on", "autoon", "auto-on"):
             user.auto_updates = True
             db.commit()
@@ -178,4 +192,5 @@ def menu(auto_enabled: bool, selected_codes) -> str:
         "• my leagues — show your list\n"
         "• reset leagues — back to ALL\n"
     )
+
 
