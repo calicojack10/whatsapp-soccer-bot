@@ -1,79 +1,74 @@
+# football_api.py
 import os
 import requests
+from datetime import datetime, timezone
 
-# API-Football key (api-sports)
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
+# TheSportsDB API key (yours is 123). Best practice: keep it in Render Env Vars as SPORTSDB_KEY
+SPORTSDB_KEY = os.getenv("SPORTSDB_KEY", "123")
 
-
-# simple in-memory cache (survives until Render restarts)
-_LAST_GOOD_TEXT = None
-_LAST_GOOD_TS = 0
-
-# League IDs (API-Football)
-# Top 5 leagues + Championship + UEFA competitions
-LEAGUES = {
-    "EPL": 39,          # Premier League
-    "LALIGA": 140,      # La Liga
-    "SERIEA": 135,      # Serie A
-    "BUNDESLIGA": 78,   # Bundesliga
-    "LIGUE1": 61,       # Ligue 1
-    "CHAMP": 40,        # Championship
-    "UCL": 2,           # UEFA Champions League
-    "UEL": 3,           # UEFA Europa League
-    "UECL": 848,        # UEFA Europa Conference League
-}
+# Keywords TheSportsDB may use to indicate a match is currently in progress
+LIVE_KEYWORDS = (
+    "live",
+    "in play",
+    "inplay",
+    "half time",
+    "halftime",
+    "1st half",
+    "2nd half",
+    "playing",
+)
 
 def live_scores(max_games: int = 12) -> str:
-    global _LAST_GOOD_TEXT, _LAST_GOOD_TS
+    """
+    TheSportsDB integration:
+    - Fetches today's soccer events (UTC date)
+    - Tries to detect LIVE matches using strStatus
+    - If none detected, returns today's matches with status
+    """
 
-    if not API_FOOTBALL_KEY:
-        return "⚠️ Missing API_FOOTBALL_KEY. Add it in Render Env Vars."
+    # TheSportsDB expects date in YYYY-MM-DD
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    url = "https://v3.football.api-sports.io/fixtures?live=all"
-    headers = {"x-apisports-key": API_FOOTBALL_KEY}
+    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_KEY}/eventsday.php"
+    params = {"d": today, "s": "Soccer"}
 
     try:
-        r = requests.get(url, headers=headers, timeout=15)
-        status = r.status_code
-        payload = r.json() if r.content else {}
-    except Exception as e:
-        print(f"[API-Football] EXCEPTION: {e}")
-        # If we have a recent cache, use it
-        if _LAST_GOOD_TEXT and (time.time() - _LAST_GOOD_TS) < 600:
-            return _LAST_GOOD_TEXT + "\n\n(Showing last known update)"
-        return "⚠️ Could not reach the football API right now."
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        payload = r.json() or {}
+    except Exception:
+        return "⚠️ Could not reach TheSportsDB right now."
 
-    results = payload.get("results")
-    errors = payload.get("errors")
-    response = payload.get("response") or []
+    events = payload.get("events") or []
+    if not events:
+        return "⚽ No matches found for today."
 
-    print(f"[API-Football] status={status} results={results} resp_len={len(response)} errors={errors}")
+    def fmt_event(e, include_status: bool = True) -> str:
+        league = e.get("strLeague") or "Soccer"
+        home = e.get("strHomeTeam") or "Home"
+        away = e.get("strAwayTeam") or "Away"
+        hs = e.get("intHomeScore")
+        a_s = e.get("intAwayScore")
+        status = (e.get("strStatus") or "Scheduled").strip()
 
-    # If API returns empty but we recently had data, show cached data instead of saying "no matches"
-    if len(response) == 0:
-        if _LAST_GOOD_TEXT and (time.time() - _LAST_GOOD_TS) < 600:
-            return _LAST_GOOD_TEXT + "\n\n(Showing last known update)"
-        return "⚽ No live matches right now."
+        score = ""
+        if hs is not None and a_s is not None:
+            score = f"{hs}-{a_s}"
 
-    lines = []
-    for m in response[:max_games]:
-        league_name = (m.get("league") or {}).get("name", "League")
-        home = (m.get("teams") or {}).get("home", {}).get("name", "Home")
-        away = (m.get("teams") or {}).get("away", {}).get("name", "Away")
-        goals = m.get("goals") or {}
-        minute = (m.get("fixture") or {}).get("status", {}).get("elapsed")
+        if include_status:
+            return f"{league}: {home} {score} {away} ({status})".replace("  ", " ").strip()
+        return f"{league}: {home} {score} {away}".replace("  ", " ").strip()
 
-        score_home = goals.get("home")
-        score_away = goals.get("away")
+    # Try to detect live matches
+    live = []
+    for e in events:
+        status = (e.get("strStatus") or "").strip().lower()
+        if any(k in status for k in LIVE_KEYWORDS):
+            live.append(fmt_event(e, include_status=True))
 
-        minute_txt = f"{minute}'" if minute is not None else ""
-        lines.append(f"{league_name}: {home} {score_home}-{score_away} {away} {minute_txt}".strip())
+    if live:
+        return "⚽ Live Matches\n\n" + "\n".join(live[:max_games])
 
-    text = "⚽ Live Matches\n\n" + "\n".join(lines)
-
-    # update cache
-    _LAST_GOOD_TEXT = text
-    _LAST_GOOD_TS = time.time()
-
-    return text
-
+    # No live detected — show today's list with statuses
+    lines = [fmt_event(e, include_status=True) for e in events[:max_games]]
+    return "⚽ Today’s Matches (no live detected)\n\n" + "\n".join(lines)
