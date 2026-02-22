@@ -7,7 +7,7 @@ import os
 
 app = FastAPI()
 
-VERIFY_TOKEN = "my_verify_token"  # must match Meta dashboard
+VERIFY_TOKEN = "live_ball"  # must match Meta dashboard
 
 
 # =========================
@@ -79,4 +79,5 @@ menu - show menu
 scores - live matches
 auto on - automatic updates
 auto off - stop updates
+
 """
