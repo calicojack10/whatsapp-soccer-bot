@@ -1,7 +1,7 @@
 import requests
 
-ACCESS_TOKEN = "YOUR_WHATSAPP_ACCESS_TOKEN"
-PHONE_ID = "YOUR_PHONE_NUMBER_ID"
+ACCESS_TOKEN = "EAA83CwyZBN9QBQxXNY6IoyeqTZCeuYqjZB96kdkbLLoWBpGdPZCnLY3HOqSLMLVJMgdeFBVUGnScfEwqUsGKxrhLqtkrPrE3tFu6fYAPn2XVGAXpNEWihnZAP45y5uQwBPZAAS2ZAVGyGtJmQNyzJtE1npePhbMZBdkJ77gt4ZBKrHe7eoQEvRhjFAg0Ob4gZB2blu4fwdFZATtRdEitK0ehPkVlmVAmA1SUt210Hljs544"
+PHONE_ID = "1049528254903132"
 
 
 def send_message(phone, text):
@@ -18,5 +18,6 @@ def send_message(phone, text):
         "type": "text",
         "text": {"body": text},
     }
+
 
     requests.post(url, json=payload, headers=headers)
