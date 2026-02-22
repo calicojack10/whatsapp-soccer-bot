@@ -62,3 +62,4 @@ def live_scores(max_games: int = 12) -> str:
         return "⚽ No live matches right now."
 
     return "⚽ Live Matches\n\n" + "\n".join(lines)
+
