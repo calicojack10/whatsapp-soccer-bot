@@ -15,10 +15,18 @@ LIVE_KEYWORDS = (
     "playing",
 )
 
+FINISHED_KEYWORDS = (
+    "finished",
+    "match finished",
+    "ft",
+    "full time",
+    "fulltime",
+)
+
 # User-facing league codes -> keywords to match TheSportsDB strLeague text
 LEAGUE_MAP = {
     "epl": ["premier league", "english premier league"],
-    "laliga": ["la liga", "spanish la liga"],
+    "la liga": ["la liga", "spanish la liga"],
     "seriea": ["serie a", "italian serie a"],
     "bundesliga": ["bundesliga", "german bundesliga"],
     "ligue1": ["ligue 1", "french ligue 1"],
@@ -51,10 +59,6 @@ def fetch_events_today():
     return payload.get("events") or []
 
 def _match_selected_leagues(event, selected_codes):
-    """
-    If selected_codes is empty => ALL leagues allowed.
-    Otherwise match TheSportsDB strLeague text to our code keywords.
-    """
     if not selected_codes:
         return True
 
@@ -87,8 +91,6 @@ def _fmt_event(e, include_status=True) -> str:
 
 def build_scores_message(events, selected_codes=None, max_games: int = 12) -> str:
     selected_codes = selected_codes or []
-
-    # filter by selected leagues
     filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
 
     if not filtered:
@@ -96,7 +98,6 @@ def build_scores_message(events, selected_codes=None, max_games: int = 12) -> st
             return "⚽ No matches found for your selected leagues today."
         return "⚽ No matches found for today."
 
-    # find live-ish
     live = []
     for e in filtered:
         status = (e.get("strStatus") or "").strip().lower()
@@ -106,6 +107,25 @@ def build_scores_message(events, selected_codes=None, max_games: int = 12) -> st
     if live:
         return "⚽ Live Matches\n\n" + "\n".join(live[:max_games])
 
-    # otherwise show today's matches for those leagues
     lines = [_fmt_event(e, include_status=True) for e in filtered[:max_games]]
     return "⚽ Today’s Matches (no live detected)\n\n" + "\n".join(lines)
+
+def build_results_message(events, selected_codes=None, max_games: int = 12) -> str:
+    """
+    Show today's FINISHED results (FT).
+    """
+    selected_codes = selected_codes or []
+    filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
+
+    finished = []
+    for e in filtered:
+        status = (e.get("strStatus") or "").strip().lower()
+        if any(k in status for k in FINISHED_KEYWORDS):
+            finished.append(_fmt_event(e, include_status=False))
+
+    if not finished:
+        if selected_codes:
+            return "🏁 No finished results yet today for your selected leagues."
+        return "🏁 No finished results yet today."
+
+    return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
