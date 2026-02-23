@@ -196,12 +196,12 @@ def build_live_message(events, selected_codes=None, max_games: int = 12) -> str:
 
     if not live:
         return (
-            "🔴 No live matches right now for your selected leagues."
+            "No live matches right now for your selected leagues."
             if selected_codes
-            else "🔴 No live matches right now."
+            else "No live matches right now."
         )
 
-    return "🔴 Live Now\n\n" + "\n".join(live[:max_games])
+    return "Live Now\n\n" + "\n".join(live[:max_games])
 
 
 def build_fixtures_message(events, selected_codes=None, max_games: int = 12) -> str:
@@ -292,6 +292,7 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         )
 
     return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
+
 
 
 
