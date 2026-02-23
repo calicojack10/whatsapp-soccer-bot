@@ -268,22 +268,37 @@ def build_fixtures_message(events, selected_codes=None, max_games: int = 12) -> 
 
     grouped = {}
     count = 0
+
     for e in filtered:
         if not _is_scheduled(e):
             continue
+
         league = e.get("strLeague") or "Soccer"
         home = e.get("strHomeTeam") or "Home"
         away = e.get("strAwayTeam") or "Away"
         t = _format_kickoff_time(e)
-        grouped.setdefault(league, []).append(f"{t} — {home} vs {away}")
+
+        grouped.setdefault(league, []).append(f"• {t} — {home} vs {away}")
+
         count += 1
         if count >= max_games:
             break
 
     if not grouped:
-        return "No fixtures found for today for your selected leagues." if selected_codes else "No fixtures found for today."
+        return (
+            "No fixtures found for today for your selected leagues."
+            if selected_codes
+            else "No fixtures found for today."
+        )
 
-    return _group_by_league(grouped, "TODAY")
+    lines = ["TODAY", ""]
+    for league in sorted(grouped.keys()):
+        lines.append(league)
+        for line in grouped[league]:
+            lines.append(f"  {line}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
 
 
 def build_results_message(events, selected_codes=None, max_games: int = 12) -> str:
@@ -305,4 +320,5 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
 
     return _group_by_league(grouped, "RESULTS")
+
 
