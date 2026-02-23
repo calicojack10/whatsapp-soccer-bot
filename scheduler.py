@@ -1,9 +1,9 @@
-import os
+# scheduler.py
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from database import SessionLocal, User
 from whatsapp import send_message
-from football_api import fetch_events_today, build_scores_message, LEAGUE_MAP
+from football_api import fetch_events_today, build_live_message, LEAGUE_MAP
 
 
 def _parse_leagues(leagues_str: str):
@@ -27,20 +27,14 @@ def send_auto_updates():
 
         for user in users:
             selected = _parse_leagues(user.leagues)
-            msg = build_scores_message(events, selected_codes=selected, max_games=10)
+            msg = build_live_message(events, selected_codes=selected, max_games=10)
             send_message(user.phone, msg)
 
     finally:
         db.close()
 
 
-def start_scheduler():
-    sched = BackgroundScheduler()
-    sched.add_job(send_auto_updates, "interval", minutes=10, max_instances=1, coalesce=True)
-    sched.start()
-    return sched
-
-
-# ✅ Only run scheduler when explicitly enabled
-if os.getenv("ENABLE_SCHEDULER", "0") == "1":
-    start_scheduler()
+scheduler = BackgroundScheduler()
+# 10 minutes is safer for free APIs; change to 5 if you want later
+scheduler.add_job(send_auto_updates, "interval", minutes=10, max_instances=1, coalesce=True)
+scheduler.start()
