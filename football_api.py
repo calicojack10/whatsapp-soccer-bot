@@ -336,6 +336,36 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
 
     return _group_by_league(grouped, "RESULTS")
 
+def debug_league_names(events, selected_codes=None, limit: int = 40) -> str:
+    """
+    Returns the list of unique league names found in today's events.
+    If selected_codes is provided, it applies the same filtering rules.
+    """
+    selected_codes = selected_codes or []
+    names = set()
+
+    for e in events:
+        if not _match_selected_leagues(e, selected_codes):
+            continue
+        name = (e.get("strLeague") or "").strip()
+        if name:
+            names.add(name)
+
+    if not names:
+        return "No league names found in today's feed."
+
+    # Sorted for readability
+    out = ["LEAGUES (from TheSportsDB today):", ""]
+    for n in sorted(names)[:limit]:
+        out.append(f"• {n}")
+
+    if len(names) > limit:
+        out.append("")
+        out.append(f"...and {len(names) - limit} more")
+
+    return "\n".join(out)
+
+
 
 
 
