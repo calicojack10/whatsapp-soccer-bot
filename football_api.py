@@ -146,9 +146,29 @@ def _has_score(e) -> bool:
 
 
 def _is_live(e) -> bool:
+    """
+    Live if:
+    - status contains live keywords, OR
+    - it has a score AND it's not scheduled AND not finished/cancelled.
+    This catches games where TheSportsDB doesn't label status as 'Live' but score updates.
+    """
     status = (e.get("strStatus") or "").strip().lower()
-    return any(k in status for k in LIVE_KEYWORDS)
 
+    # obvious live statuses
+    if any(k in status for k in LIVE_KEYWORDS):
+        return True
+
+    # score present can indicate match in progress on TheSportsDB free feeds
+    if _has_score(e):
+        if any(k in status for k in SCHEDULED_KEYWORDS):
+            return False
+        if any(k in status for k in FINISHED_KEYWORDS):
+            return False
+        if any(k in status for k in IGNORED_STATUSES):
+            return False
+        return True
+
+    return False
 
 def _is_scheduled(e) -> bool:
     status = (e.get("strStatus") or "").strip().lower()
@@ -158,25 +178,12 @@ def _is_scheduled(e) -> bool:
 
 def _is_finished(e) -> bool:
     """
-    Robust finished detection:
-    - If status contains finished keywords -> finished
-    - Else if it has a score AND isn't live/scheduled/cancelled/etc -> treat as finished
+    STRICT finished detection:
+    Only treat as finished if status clearly says so.
+    This prevents in-progress games with scores from appearing as results.
     """
     status = (e.get("strStatus") or "").strip().lower()
-
-    if any(k in status for k in FINISHED_KEYWORDS):
-        return True
-
-    if _has_score(e):
-        if any(k in status for k in LIVE_KEYWORDS):
-            return False
-        if any(k in status for k in SCHEDULED_KEYWORDS):
-            return False
-        if any(k in status for k in IGNORED_STATUSES):
-            return False
-        return True
-
-    return False
+    return any(k in status for k in FINISHED_KEYWORDS)
 
 
 def build_live_message(events, selected_codes=None, max_games: int = 12) -> str:
@@ -278,9 +285,9 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
 
     if not finished:
         return (
-            "🏁 No finished results found yet today for your selected leagues."
+            "🏁 No finished results yet today for your selected leagues."
             if selected_codes
-            else "🏁 No finished results found yet today."
+            else "🏁 No finished results yet today."
         )
 
     return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
