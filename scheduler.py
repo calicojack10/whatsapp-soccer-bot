@@ -1,3 +1,4 @@
+import os
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from database import SessionLocal, User
@@ -20,9 +21,8 @@ def send_auto_updates():
             return
 
         # Fetch once per tick
-        try:
-            events = fetch_events_today()
-        except Exception:
+        events = fetch_events_today()
+        if not events:
             return
 
         for user in users:
@@ -34,6 +34,13 @@ def send_auto_updates():
         db.close()
 
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(send_auto_updates, "interval", minutes=10, max_instances=1)  # safer on free APIs
-scheduler.start()
+def start_scheduler():
+    sched = BackgroundScheduler()
+    sched.add_job(send_auto_updates, "interval", minutes=10, max_instances=1, coalesce=True)
+    sched.start()
+    return sched
+
+
+# ✅ Only run scheduler when explicitly enabled
+if os.getenv("ENABLE_SCHEDULER", "0") == "1":
+    start_scheduler()
