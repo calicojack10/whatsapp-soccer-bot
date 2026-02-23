@@ -46,7 +46,7 @@ IGNORED_STATUSES = (
 LEAGUE_MAP = {
     # Top 5 + Championship
     "epl": ["premier league", "english premier league"],
-    "laliga": ["la liga", "spanish la liga"],
+    "laliga": [ "laliga", "la liga", "la liga santander", "spanish laliga", "spanish la liga", "primera division", "primera división", "spain primera division", "spanish primera division",],
     "seriea": ["serie a", "italian serie a"],
     "bundesliga": ["bundesliga", "german bundesliga"],
     "ligue1": ["ligue 1", "french ligue 1"],
@@ -326,6 +326,7 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
 
     return _group_by_league(grouped, "RESULTS")
+
 
 
 
