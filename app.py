@@ -7,7 +7,8 @@ from database import SessionLocal, User
 from whatsapp import send_message
 from football_api import (
     fetch_events_today,
-    build_scores_message,
+    build_live_message,
+    build_fixtures_message,
     build_results_message,
     available_leagues_text,
     LEAGUE_MAP,
@@ -18,7 +19,6 @@ import scheduler  # starts scheduler on import
 # ✅ Uvicorn expects to find this variable: app
 app = FastAPI()
 
-# Must match the Verify Token you set in Meta
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "live_ball")
 
 
@@ -27,9 +27,6 @@ async def health():
     return {"status": "ok"}
 
 
-# =========================
-# WEBHOOK VERIFICATION (GET)
-# =========================
 @app.get("/webhook")
 async def verify_webhook(request: Request):
     params = request.query_params
@@ -38,30 +35,23 @@ async def verify_webhook(request: Request):
     challenge = params.get("hub.challenge")
 
     if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
-        # Meta requires raw challenge text
         return PlainTextResponse(challenge)
 
     return PlainTextResponse("Verification failed", status_code=403)
 
 
-# =========================
-# RECEIVE WHATSAPP EVENTS (POST)
-# =========================
 @app.post("/webhook")
 async def webhook(req: Request):
-    # Never crash on bad input
     try:
         data = await req.json()
     except Exception:
         return {"status": "no json"}
 
-    # WhatsApp sends many event types; only some contain "messages"
     try:
         value = data["entry"][0]["changes"][0]["value"]
     except Exception:
         return {"status": "unrecognized payload"}
 
-    # Ignore non-message events
     if "messages" not in value:
         return {"status": "no message in event"}
 
@@ -86,9 +76,6 @@ async def webhook(req: Request):
 
         selected = parse_user_leagues(user.leagues)
 
-        # =========================
-        # COMMANDS
-        # =========================
         if text == "menu":
             send_message(phone, menu(user.auto_updates, selected))
 
@@ -111,26 +98,22 @@ async def webhook(req: Request):
             db.commit()
             send_message(phone, "✅ Reset complete. You will now receive *ALL* leagues.")
 
-        elif text == "scores":
-            try:
-                events = fetch_events_today()
-                send_message(phone, build_scores_message(events, selected_codes=selected))
-            except Exception:
-                send_message(phone, "⚠️ Could not fetch scores right now. Try again in a minute.")
+        # ✅ New separated commands
+        elif text in ("live", "scores"):
+            events = fetch_events_today()
+            send_message(phone, build_live_message(events, selected_codes=selected))
+
+        elif text in ("fixtures", "today"):
+            events = fetch_events_today()
+            send_message(phone, build_fixtures_message(events, selected_codes=selected))
 
         elif text == "results":
-            try:
-                events = fetch_events_today()
-                send_message(phone, build_results_message(events, selected_codes=selected))
-            except Exception:
-                send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
+            events = fetch_events_today()
+            send_message(phone, build_results_message(events, selected_codes=selected))
 
         elif text == "results all":
-            try:
-                events = fetch_events_today()
-                send_message(phone, build_results_message(events, selected_codes=[]))
-            except Exception:
-                send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
+            events = fetch_events_today()
+            send_message(phone, build_results_message(events, selected_codes=[]))
 
         elif text in ("auto on", "autoon", "auto-on"):
             user.auto_updates = True
@@ -151,14 +134,7 @@ async def webhook(req: Request):
     return {"status": "ok"}
 
 
-# =========================
-# HELPERS
-# =========================
 def parse_user_leagues(leagues_str: str):
-    """
-    If leagues_str is empty => user wants ALL leagues.
-    Otherwise it's a comma-separated list of codes.
-    """
     if not leagues_str:
         return []
     parts = [p.strip().lower() for p in leagues_str.split(",") if p.strip()]
@@ -207,7 +183,8 @@ def menu(auto_enabled: bool, selected_codes) -> str:
         f"Auto updates: {auto_status}\n"
         f"Leagues: {leagues_status}\n\n"
         "Commands:\n"
-        "• scores — live/today matches\n"
+        "• live (or scores) — live matches now\n"
+        "• fixtures (or today) — today’s scheduled matches\n"
         "• results — today’s finished games\n"
         "• results all — finished games (ignores league filter)\n"
         "• auto on / auto off\n"
