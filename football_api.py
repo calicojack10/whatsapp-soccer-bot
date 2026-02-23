@@ -2,6 +2,8 @@
 import os
 import requests
 from datetime import datetime, timezone
+import re
+import unicodedata
 
 SPORTSDB_KEY = os.getenv("SPORTSDB_KEY", "123")
 
@@ -326,6 +328,7 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
 
     return _group_by_league(grouped, "RESULTS")
+
 
 
 
