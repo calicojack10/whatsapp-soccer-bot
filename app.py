@@ -1,18 +1,22 @@
+# app.py
 import os
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
-from football_api import fetch_events_today, build_scores_message, build_results_message
+
 from database import SessionLocal, User
 from whatsapp import send_message
 from football_api import (
     fetch_events_today,
     build_scores_message,
+    build_results_message,
     available_leagues_text,
     LEAGUE_MAP,
 )
 import scheduler  # starts scheduler on import
 
 app = FastAPI()
+
+# Must match the Verify Token you set in Meta
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "live_ball")
 
 
@@ -21,6 +25,9 @@ async def health():
     return {"status": "ok"}
 
 
+# =========================
+# WEBHOOK VERIFICATION (GET)
+# =========================
 @app.get("/webhook")
 async def verify_webhook(request: Request):
     params = request.query_params
@@ -34,18 +41,24 @@ async def verify_webhook(request: Request):
     return PlainTextResponse("Verification failed", status_code=403)
 
 
+# =========================
+# RECEIVE WHATSAPP EVENTS (POST)
+# =========================
 @app.post("/webhook")
 async def webhook(req: Request):
+    # Never crash on bad input
     try:
         data = await req.json()
     except Exception:
         return {"status": "no json"}
 
+    # WhatsApp sends many event types; only some contain "messages"
     try:
         value = data["entry"][0]["changes"][0]["value"]
     except Exception:
         return {"status": "unrecognized payload"}
 
+    # Ignore non-message events
     if "messages" not in value:
         return {"status": "no message in event"}
 
@@ -70,6 +83,9 @@ async def webhook(req: Request):
 
         selected = parse_user_leagues(user.leagues)
 
+        # =========================
+        # COMMANDS
+        # =========================
         if text == "menu":
             send_message(phone, menu(user.auto_updates, selected))
 
@@ -81,13 +97,11 @@ async def webhook(req: Request):
 
         elif text.startswith("add "):
             code = text.replace("add ", "").strip()
-            msg_out = add_league(user, code, db)
-            send_message(phone, msg_out)
+            send_message(phone, add_league(user, code, db))
 
         elif text.startswith("remove "):
             code = text.replace("remove ", "").strip()
-            msg_out = remove_league(user, code, db)
-            send_message(phone, msg_out)
+            send_message(phone, remove_league(user, code, db))
 
         elif text == "reset leagues":
             user.leagues = ""
@@ -106,7 +120,7 @@ async def webhook(req: Request):
                 events = fetch_events_today()
                 send_message(phone, build_results_message(events, selected_codes=selected))
             except Exception:
-        send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
+                send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
 
         elif text == "results all":
             try:
@@ -134,11 +148,17 @@ async def webhook(req: Request):
     return {"status": "ok"}
 
 
+# =========================
+# HELPERS
+# =========================
 def parse_user_leagues(leagues_str: str):
+    """
+    If leagues_str is empty => user wants ALL leagues.
+    Otherwise it's a comma-separated list of codes.
+    """
     if not leagues_str:
         return []
     parts = [p.strip().lower() for p in leagues_str.split(",") if p.strip()]
-    # keep only valid codes
     return [p for p in parts if p in LEAGUE_MAP]
 
 
@@ -185,6 +205,8 @@ def menu(auto_enabled: bool, selected_codes) -> str:
         f"Leagues: {leagues_status}\n\n"
         "Commands:\n"
         "• scores — live/today matches\n"
+        "• results — today’s finished games\n"
+        "• results all — finished games (ignores league filter)\n"
         "• auto on / auto off\n"
         "• leagues — list options\n"
         "• add <code> — subscribe\n"
@@ -192,5 +214,3 @@ def menu(auto_enabled: bool, selected_codes) -> str:
         "• my leagues — show your list\n"
         "• reset leagues — back to ALL\n"
     )
-
-
