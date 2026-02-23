@@ -293,3 +293,4 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
     return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
 
 
+
