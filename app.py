@@ -12,6 +12,7 @@ from football_api import (
     build_results_message,
     available_leagues_text,
     LEAGUE_MAP,
+    DEFAULT_LEAGUES,
 )
 
 import scheduler  # starts scheduler on import
@@ -135,15 +136,17 @@ async def webhook(req: Request):
 
 
 def parse_user_leagues(leagues_str: str):
+    # Empty => default pack (not ALL)
     if not leagues_str:
-        return []
-    parts = [p.strip().lower() for p in leagues_str.split(",") if p.strip()]
-    return [p for p in parts if p in LEAGUE_MAP]
+        return DEFAULT_LEAGUES
 
+    parts = [p.strip().lower() for p in leagues_str.split(",") if p.strip()]
+    cleaned = [p for p in parts if p in LEAGUE_MAP]
+
+    # If user saved something invalid/empty, fall back to defaults
+    return cleaned if cleaned else DEFAULT_LEAGUES
 
 def my_leagues_text(selected_codes):
-    if not selected_codes:
-        return "🌍 You’re set to *ALL* leagues.\n\nUse `add epl` etc. to filter."
     return "✅ Your leagues:\n\n" + ", ".join(selected_codes)
 
 
