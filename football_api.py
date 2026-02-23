@@ -130,19 +130,20 @@ def _fmt_event(e, include_status=True) -> str:
     away = e.get("strAwayTeam") or "Away"
     hs = e.get("intHomeScore")
     a_s = e.get("intAwayScore")
-    status = (e.get("strStatus") or "Scheduled").strip()
+    status = (e.get("strStatus") or "").strip()
 
     score = ""
     if hs is not None and a_s is not None:
         score = f"{hs}-{a_s}"
 
-    if include_status:
-        return f"{league}: {home} {score} {away} ({status})".replace("  ", " ").strip()
-    return f"{league}: {home} {score} {away}".replace("  ", " ").strip()
+    # If live, display status prominently
+    if _is_live(e):
+        return f"{league}: {home} {score} {away} — {status}"
 
+    if include_status and status:
+        return f"{league}: {home} {score} {away} ({status})"
 
-def _has_score(e) -> bool:
-    return e.get("intHomeScore") is not None and e.get("intAwayScore") is not None
+    return f"{league}: {home} {score} {away}"
 
 
 def _is_live(e) -> bool:
@@ -291,6 +292,7 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         )
 
     return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
+
 
 
 
