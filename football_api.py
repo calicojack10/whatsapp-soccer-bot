@@ -149,23 +149,35 @@ def _fmt_result_line(e) -> str:
     return f"{home} {score} {away}".replace("  ", " ").strip()
 
 
+from zoneinfo import ZoneInfo
+from datetime import datetime
+
+NY_TZ = ZoneInfo("America/New_York")
+
+
 def _format_kickoff_time(e) -> str:
     """
-    Best-effort kickoff time:
-    - Prefer strTimestamp -> convert to ET
-    - Fallback: strTime
+    Convert TheSportsDB UTC timestamp to New York time (America/New_York).
+    Falls back safely if timestamp not present.
     """
+
     ts = e.get("strTimestamp")
+
     if ts:
         try:
+            # Ensure UTC awareness
             ts_clean = ts.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(ts_clean)
-            # keep it simple: ET formatting without extra dependencies
-            # If server timezone conversion isn't ideal, it's still consistent.
-            return dt.strftime("%-I:%M %p")
+            dt_utc = datetime.fromisoformat(ts_clean)
+
+            # Convert to NYC timezone
+            dt_ny = dt_utc.astimezone(NY_TZ)
+
+            return dt_ny.strftime("%-I:%M %p ET")
+
         except Exception:
             pass
 
+    # Fallback if timestamp missing
     t = (e.get("strTime") or "").strip()
     if t:
         try:
@@ -293,3 +305,4 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
 
     return _group_by_league(grouped, "RESULTS")
+
