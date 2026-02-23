@@ -2,6 +2,7 @@
 import os
 import requests
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 SPORTSDB_KEY = os.getenv("SPORTSDB_KEY", "123")
 
@@ -174,22 +175,78 @@ def build_live_message(events, selected_codes=None, max_games: int = 12) -> str:
 
 
 def build_fixtures_message(events, selected_codes=None, max_games: int = 12) -> str:
-    """Only scheduled/not-started matches for today."""
+    """
+    Only scheduled/not-started matches for today.
+    Output grouped by league, includes kickoff time, uses 'vs', no status text.
+    """
     selected_codes = selected_codes or []
     filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
 
-    fixtures = [_fmt_event(e, include_status=True) for e in filtered if _is_scheduled(e)]
+    # Collect fixtures and group by league
+    by_league = {}
+    count = 0
 
-    if not fixtures:
+    for e in filtered:
+        if not _is_scheduled(e):
+            continue
+
+        league = e.get("strLeague") or "Soccer"
+        home = e.get("strHomeTeam") or "Home"
+        away = e.get("strAwayTeam") or "Away"
+        time_txt = _format_kickoff_time(e)
+
+        by_league.setdefault(league, []).append(f"{time_txt} — {home} vs {away}")
+        count += 1
+        if count >= max_games:
+            break
+
+    if not by_league:
         return (
-            "📅 No fixtures found for today for your selected leagues."
+            "No fixtures found for today for your selected leagues."
             if selected_codes
-            else "📅 No fixtures found for today."
+            else "No fixtures found for today."
         )
 
-    return "📅 Today’s Fixtures\n\n" + "\n".join(fixtures[:max_games])
+    # Build nicely formatted message
+    lines = ["Today’s Fixtures", ""]
+    for league in sorted(by_league.keys()):
+        lines.append(league)
+        for item in by_league[league]:
+            lines.append(f"• {item}")
+        lines.append("")
 
+    return "\n".join(lines).strip()
 
+def _format_kickoff_time(e) -> str:
+    """
+    Best-effort kickoff time:
+    - If strTimestamp exists (often ISO like '2026-02-23T20:00:00+00:00'), convert to ET
+    - Else fallback to (strTime) as-is
+    """
+    # 1) Try timestamp -> ET
+    ts = e.get("strTimestamp")
+    if ts:
+        try:
+            # Handle 'Z' if present
+            ts_clean = ts.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts_clean)
+            dt_et = dt.astimezone(ZoneInfo("America/New_York"))
+            return dt_et.strftime("%-I:%M %p ET")  # e.g. 3:00 PM ET
+        except Exception:
+            pass
+
+    # 2) Fallback to strTime (TheSportsDB often provides HH:MM:SS)
+    t = (e.get("strTime") or "").strip()
+    if t:
+        try:
+            # convert 20:00:00 -> 8:00 PM (no timezone guarantee)
+            dt = datetime.strptime(t, "%H:%M:%S")
+            return dt.strftime("%-I:%M %p")
+        except Exception:
+            return t
+
+    return "TBD"
+    
 def build_results_message(events, selected_codes=None, max_games: int = 12) -> str:
     """Only finished results for today."""
     selected_codes = selected_codes or []
@@ -205,3 +262,4 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         )
 
     return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
+
