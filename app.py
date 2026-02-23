@@ -13,6 +13,7 @@ from football_api import (
     available_leagues_text,
     LEAGUE_MAP,
     DEFAULT_LEAGUES,
+    debug_league_names,
 )
 
 import scheduler  # starts scheduler on import
@@ -122,6 +123,11 @@ async def webhook(req: Request):
         elif text == "results":
             events = fetch_events_today()
             send_message(phone, build_results_message(events, selected_codes=selected))
+            
+        elif text == "debug leagues":
+             events = fetch_events_today()
+                # show ALL leagues from today (ignore filtering)
+             send_message(phone, debug_league_names(events, selected_codes=[]))
 
         elif text in ("auto on", "autoon", "auto-on"):
             user.auto_updates = True
@@ -197,4 +203,5 @@ def menu(auto_enabled: bool, selected_codes) -> str:
         "• my leagues\n"
         "• reset leagues\n"
     )
+
 
