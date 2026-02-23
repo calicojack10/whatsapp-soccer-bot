@@ -49,17 +49,35 @@ IGNORED_STATUSES = (
 
 # User-facing league codes -> keywords to match TheSportsDB strLeague text
 LEAGUE_MAP = {
+    # Top 5 + extras you already had
     "epl": ["premier league", "english premier league"],
     "laliga": ["la liga", "spanish la liga"],
     "seriea": ["serie a", "italian serie a"],
     "bundesliga": ["bundesliga", "german bundesliga"],
     "ligue1": ["ligue 1", "french ligue 1"],
     "champ": ["championship", "english championship", "efl championship"],
+
+    # UEFA competitions
     "ucl": ["uefa champions league", "champions league"],
     "uel": ["uefa europa league", "europa league"],
     "uecl": ["uefa europa conference league", "europa conference league", "conference league"],
+
+    # New leagues you requested
+    "turkey": ["super lig", "süper lig", "turkish super lig", "turkish süper lig"],
+    "portugal": ["primeira liga", "liga portugal", "portuguese primeira liga"],
+    "switzerland": ["swiss super league", "super league (switzerland)", "credit suisse super league"],
+    "scotland": ["scottish premiership", "premiership (scotland)"],
+    "austria": ["austrian bundesliga", "bundesliga (austria)"],
+    "belgium": ["jupiler pro league", "belgian pro league", "pro league (belgium)"],
+    "denmark": ["danish superliga", "3f superliga", "superliga (denmark)"],
 }
 
+DEFAULT_LEAGUES = [
+    "epl", "laliga", "seriea", "bundesliga", "ligue1",
+    "champ",
+    "ucl", "uel", "uecl",
+    "turkey", "portugal", "switzerland", "scotland", "austria", "belgium", "denmark",
+]
 
 def available_leagues_text() -> str:
     return (
@@ -86,10 +104,14 @@ def fetch_events_today():
     return payload.get("events") or []
 
 
+
 def _match_selected_leagues(event, selected_codes):
-    """If selected_codes is empty => ALL leagues allowed."""
+    """
+    If selected_codes is empty => use DEFAULT_LEAGUES.
+    Otherwise match TheSportsDB strLeague text to our code keywords.
+    """
     if not selected_codes:
-        return True
+        selected_codes = DEFAULT_LEAGUES
 
     league_text = (event.get("strLeague") or "").strip().lower()
     if not league_text:
@@ -262,4 +284,5 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         )
 
     return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
+
 
