@@ -1,216 +1,201 @@
-# app.py
+# football_api.py
 import os
-from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+import requests
+from datetime import datetime, timezone
 
-from database import SessionLocal, User
-from whatsapp import send_message
-from football_api import (
-    fetch_events_today,
-    build_scores_message,
-    build_results_message,
-    available_leagues_text,
-    LEAGUE_MAP,
+SPORTSDB_KEY = os.getenv("SPORTSDB_KEY", "123")
+
+# Keywords TheSportsDB may use to indicate a match is currently in progress
+LIVE_KEYWORDS = (
+    "live",
+    "in play",
+    "inplay",
+    "half time",
+    "halftime",
+    "1st half",
+    "2nd half",
+    "playing",
 )
-import scheduler  # starts scheduler on import
 
-app = FastAPI()
+# More robust finished detection keywords (TheSportsDB status wording can vary)
+FINISHED_KEYWORDS = (
+    "finished",
+    "match finished",
+    "ft",
+    "full time",
+    "fulltime",
+    "ended",
+    "final",
+)
 
-# Must match the Verify Token you set in Meta
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "live_ball")
+SCHEDULED_KEYWORDS = (
+    "not started",
+    "scheduled",
+    "fixture",
+    "tbd",
+)
 
+IGNORED_STATUSES = (
+    "postponed",
+    "cancelled",
+    "canceled",
+    "abandoned",
+    "suspended",
+    "delayed",
+)
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-# =========================
-# WEBHOOK VERIFICATION (GET)
-# =========================
-@app.get("/webhook")
-async def verify_webhook(request: Request):
-    params = request.query_params
-    mode = params.get("hub.mode")
-    token = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge")
-
-    if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
-        return PlainTextResponse(challenge)
-
-    return PlainTextResponse("Verification failed", status_code=403)
-
-
-# =========================
-# RECEIVE WHATSAPP EVENTS (POST)
-# =========================
-@app.post("/webhook")
-async def webhook(req: Request):
-    # Never crash on bad input
-    try:
-        data = await req.json()
-    except Exception:
-        return {"status": "no json"}
-
-    # WhatsApp sends many event types; only some contain "messages"
-    try:
-        value = data["entry"][0]["changes"][0]["value"]
-    except Exception:
-        return {"status": "unrecognized payload"}
-
-    # Ignore non-message events
-    if "messages" not in value:
-        return {"status": "no message in event"}
-
-    try:
-        msg = value["messages"][0]
-        phone = msg["from"]
-        text = (msg.get("text") or {}).get("body", "").strip().lower()
-    except Exception:
-        return {"status": "could not parse message"}
-
-    if not text:
-        send_message(phone, "I can only read text right now. Type *menu*.")
-        return {"status": "ok"}
-
-    db = SessionLocal()
-    try:
-        user = db.get(User, phone)
-        if not user:
-            user = User(phone=phone, auto_updates=False, leagues="")
-            db.add(user)
-            db.commit()
-
-        selected = parse_user_leagues(user.leagues)
-
-        # =========================
-        # COMMANDS
-        # =========================
-        if text == "menu":
-            send_message(phone, menu(user.auto_updates, selected))
-
-        elif text == "leagues":
-            send_message(phone, available_leagues_text())
-
-        elif text == "my leagues":
-            send_message(phone, my_leagues_text(selected))
-
-        elif text.startswith("add "):
-            code = text.replace("add ", "").strip()
-            send_message(phone, add_league(user, code, db))
-
-        elif text.startswith("remove "):
-            code = text.replace("remove ", "").strip()
-            send_message(phone, remove_league(user, code, db))
-
-        elif text == "reset leagues":
-            user.leagues = ""
-            db.commit()
-            send_message(phone, "✅ Reset complete. You will now receive *ALL* leagues.")
-
-        elif text == "scores":
-            try:
-                events = fetch_events_today()
-                send_message(phone, build_scores_message(events, selected_codes=selected))
-            except Exception:
-                send_message(phone, "⚠️ Could not fetch scores right now. Try again in a minute.")
-
-        elif text == "results":
-            try:
-                events = fetch_events_today()
-                send_message(phone, build_results_message(events, selected_codes=selected))
-            except Exception:
-                send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
-
-        elif text == "results all":
-            try:
-                events = fetch_events_today()
-                send_message(phone, build_results_message(events, selected_codes=[]))
-            except Exception:
-                send_message(phone, "⚠️ Could not fetch results right now. Try again in a minute.")
-
-        elif text in ("auto on", "autoon", "auto-on"):
-            user.auto_updates = True
-            db.commit()
-            send_message(phone, "✅ Auto updates enabled. I’ll send updates for your selected leagues.")
-
-        elif text in ("auto off", "autooff", "auto-off"):
-            user.auto_updates = False
-            db.commit()
-            send_message(phone, "❌ Auto updates disabled.")
-
-        else:
-            send_message(phone, "Type *menu* to see commands.")
-
-    finally:
-        db.close()
-
-    return {"status": "ok"}
+# User-facing league codes -> keywords to match TheSportsDB strLeague text
+LEAGUE_MAP = {
+    "epl": ["premier league", "english premier league"],
+    "laliga": ["la liga", "spanish la liga"],
+    "seriea": ["serie a", "italian serie a"],
+    "bundesliga": ["bundesliga", "german bundesliga"],
+    "ligue1": ["ligue 1", "french ligue 1"],
+    "champ": ["championship", "english championship", "efl championship"],
+    "ucl": ["uefa champions league", "champions league"],
+    "uel": ["uefa europa league", "europa league"],
+    "uecl": ["uefa europa conference league", "europa conference league", "conference league"],
+}
 
 
-# =========================
-# HELPERS
-# =========================
-def parse_user_leagues(leagues_str: str):
-    """
-    If leagues_str is empty => user wants ALL leagues.
-    Otherwise it's a comma-separated list of codes.
-    """
-    if not leagues_str:
-        return []
-    parts = [p.strip().lower() for p in leagues_str.split(",") if p.strip()]
-    return [p for p in parts if p in LEAGUE_MAP]
-
-
-def my_leagues_text(selected_codes):
-    if not selected_codes:
-        return "🌍 You’re set to *ALL* leagues.\n\nUse `add epl` etc. to filter."
-    return "✅ Your leagues:\n\n" + ", ".join(selected_codes)
-
-
-def add_league(user: User, code: str, db):
-    code = code.lower()
-    if code not in LEAGUE_MAP:
-        return "❌ Unknown league code. Type *leagues* to see valid options."
-
-    current = set(parse_user_leagues(user.leagues))
-    current.add(code)
-    user.leagues = ",".join(sorted(current))
-    db.commit()
-    return f"✅ Added *{code}*. Type *my leagues* to view."
-
-
-def remove_league(user: User, code: str, db):
-    code = code.lower()
-    current = set(parse_user_leagues(user.leagues))
-    if code not in current:
-        return f"ℹ️ *{code}* wasn’t in your list. Type *my leagues*."
-
-    current.remove(code)
-    user.leagues = ",".join(sorted(current))
-    db.commit()
-
-    if not current:
-        return "✅ Removed. Your list is empty so you’re back to *ALL* leagues."
-    return f"✅ Removed *{code}*. Type *my leagues* to view."
-
-
-def menu(auto_enabled: bool, selected_codes) -> str:
-    auto_status = "ON ✅" if auto_enabled else "OFF ❌"
-    leagues_status = "ALL 🌍" if not selected_codes else ", ".join(selected_codes)
-
+def available_leagues_text() -> str:
     return (
-        "⚽ Soccer Bot\n\n"
-        f"Auto updates: {auto_status}\n"
-        f"Leagues: {leagues_status}\n\n"
-        "Commands:\n"
-        "• scores — live/today matches\n"
-        "• results — today’s finished games\n"
-        "• results all — finished games (ignores league filter)\n"
-        "• auto on / auto off\n"
-        "• leagues — list options\n"
-        "• add <code> — subscribe\n"
-        "• remove <code> — unsubscribe\n"
-        "• my leagues — show your list\n"
-        "• reset leagues — back to ALL\n"
+        "🏆 Available leagues (codes)\n\n"
+        "epl, laliga, seriea, bundesliga, ligue1, champ,\n"
+        "ucl, uel, uecl\n\n"
+        "Use:\n"
+        "• add epl\n"
+        "• remove epl\n"
+        "• my leagues\n"
+        "• reset leagues"
     )
+
+
+def fetch_events_today():
+    """
+    Fetch today's Soccer events (UTC date) from TheSportsDB.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_KEY}/eventsday.php"
+    params = {"d": today, "s": "Soccer"}
+
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
+    payload = r.json() or {}
+    return payload.get("events") or []
+
+
+def _match_selected_leagues(event, selected_codes):
+    """
+    If selected_codes is empty => ALL leagues allowed.
+    Otherwise match TheSportsDB strLeague text to our code keywords.
+    """
+    if not selected_codes:
+        return True
+
+    league_text = (event.get("strLeague") or "").strip().lower()
+    if not league_text:
+        return False
+
+    for code in selected_codes:
+        keywords = LEAGUE_MAP.get(code, [])
+        for kw in keywords:
+            if kw in league_text:
+                return True
+    return False
+
+
+def _fmt_event(e, include_status=True) -> str:
+    league = e.get("strLeague") or "Soccer"
+    home = e.get("strHomeTeam") or "Home"
+    away = e.get("strAwayTeam") or "Away"
+    hs = e.get("intHomeScore")
+    a_s = e.get("intAwayScore")
+    status = (e.get("strStatus") or "Scheduled").strip()
+
+    score = ""
+    if hs is not None and a_s is not None:
+        score = f"{hs}-{a_s}"
+
+    if include_status:
+        return f"{league}: {home} {score} {away} ({status})".replace("  ", " ").strip()
+    return f"{league}: {home} {score} {away}".replace("  ", " ").strip()
+
+
+def _has_score(e) -> bool:
+    hs = e.get("intHomeScore")
+    a_s = e.get("intAwayScore")
+    return hs is not None and a_s is not None
+
+
+def _is_live(e) -> bool:
+    status = (e.get("strStatus") or "").strip().lower()
+    return any(k in status for k in LIVE_KEYWORDS)
+
+
+def _is_finished(e) -> bool:
+    """
+    Robust finished detection for TheSportsDB:
+    - If strStatus contains obvious finished keywords -> finished
+    - Else if it has a score AND isn't live/scheduled/cancelled/etc -> treat as finished
+    """
+    status = (e.get("strStatus") or "").strip().lower()
+
+    if any(k in status for k in FINISHED_KEYWORDS):
+        return True
+
+    if _has_score(e):
+        if any(k in status for k in LIVE_KEYWORDS):
+            return False
+        if any(k in status for k in SCHEDULED_KEYWORDS):
+            return False
+        if any(k in status for k in IGNORED_STATUSES):
+            return False
+        return True
+
+    return False
+
+
+def build_scores_message(events, selected_codes=None, max_games: int = 12) -> str:
+    selected_codes = selected_codes or []
+
+    # Filter by selected leagues
+    filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
+
+    if not filtered:
+        if selected_codes:
+            return "⚽ No matches found for your selected leagues today."
+        return "⚽ No matches found for today."
+
+    # Live matches first
+    live = []
+    for e in filtered:
+        if _is_live(e):
+            live.append(_fmt_event(e, include_status=True))
+
+    if live:
+        return "⚽ Live Matches\n\n" + "\n".join(live[:max_games])
+
+    # Otherwise show today's matches for those leagues with status
+    lines = [_fmt_event(e, include_status=True) for e in filtered[:max_games]]
+    return "⚽ Today’s Matches (no live detected)\n\n" + "\n".join(lines)
+
+
+def build_results_message(events, selected_codes=None, max_games: int = 12) -> str:
+    """
+    Show today's finished results (FT) for selected leagues (or ALL if none selected).
+    """
+    selected_codes = selected_codes or []
+    filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
+
+    finished = []
+    for e in filtered:
+        if _is_finished(e):
+            finished.append(_fmt_event(e, include_status=False))
+
+    if not finished:
+        if selected_codes:
+            return "🏁 No finished results found yet today for your selected leagues."
+        return "🏁 No finished results found yet today."
+
+    return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
