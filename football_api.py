@@ -126,15 +126,20 @@ def _fmt_live_line(e) -> str:
     away = e.get("strAwayTeam") or "Away"
     hs = e.get("intHomeScore")
     a_s = e.get("intAwayScore")
-    status = (e.get("strStatus") or "").strip()
+    status_raw = (e.get("strStatus") or "").strip()
 
     score = ""
     if hs is not None and a_s is not None:
         score = f"{hs}-{a_s}"
 
-    # Minimal FlashScore-like: "Home 1-0 Away — Status"
-    if status:
-        return f"{home} {score} {away} — {status}".replace("  ", " ").strip()
+    # ✅ Force a clean ending label when finished
+    if _is_finished(e):
+        return f"{home} {score} {away} — Finished".replace("  ", " ").strip()
+
+    # otherwise, show whatever status we have (Live / 2nd Half / HT etc.)
+    if status_raw:
+        return f"{home} {score} {away} — {status_raw}".replace("  ", " ").strip()
+
     return f"{home} {score} {away}".replace("  ", " ").strip()
 
 
@@ -321,6 +326,7 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
 
     return _group_by_league(grouped, "RESULTS")
+
 
 
 
