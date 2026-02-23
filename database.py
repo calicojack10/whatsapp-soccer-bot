@@ -1,6 +1,6 @@
 # database.py
 from datetime import datetime
-from sqlalchemy import create_engine, Column, String, Boolean, DateTime, text
+from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = "sqlite:///./users.db"
@@ -30,6 +30,29 @@ class MessageLog(Base):
 
     msg_id = Column(String, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MatchState(Base):
+    """
+    Stores last known state of a match PER USER so we can detect:
+    - kickoff (first time seen live)
+    - goals (score changes)
+    - full time (status becomes finished)
+    """
+    __tablename__ = "match_state"
+
+    key = Column(String, primary_key=True, index=True)  # f"{phone}:{event_id}"
+    phone = Column(String, index=True)
+    event_id = Column(String, index=True)
+
+    home = Column(String, default="")
+    away = Column(String, default="")
+
+    home_score = Column(Integer, nullable=True)
+    away_score = Column(Integer, nullable=True)
+
+    status = Column(String, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 def _ensure_schema():
