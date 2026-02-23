@@ -48,7 +48,7 @@ IGNORED_STATUSES = (
 LEAGUE_MAP = {
     # Top 5 + Championship
     "epl": ["premier league", "english premier league"],
-    "laliga": [ "laliga", "la liga", "la liga santander", "spanish laliga", "spanish la liga", "primera division", "primera división", "spain primera division", "spanish primera division",],
+    "laliga": ["laliga", "la liga", "laliga santander", "spanish laliga", "spain laliga", "primera division", "primera division spain", "spain primera division",],
     "seriea": ["serie a", "italian serie a"],
     "bundesliga": ["bundesliga", "german bundesliga"],
     "ligue1": ["ligue 1", "french ligue 1"],
@@ -61,7 +61,7 @@ LEAGUE_MAP = {
 
     # Defaults you asked to include
     "turkey": ["super lig", "süper lig", "turkish super lig", "turkish süper lig"],
-    "portugal": ["primeira liga", "liga portugal", "portuguese primeira liga"],
+   "portugal": ["liga portugal", "liga portugal betclic", "primeira liga", "portuguese primeira liga","portugal primeira liga",],
     "switzerland": ["swiss super league", "super league (switzerland)"],
     "scotland": ["scottish premiership", "premiership (scotland)"],
     "austria": ["austrian bundesliga", "bundesliga (austria)"],
@@ -76,6 +76,16 @@ DEFAULT_LEAGUES = [
     "ucl", "uel", "uecl",
     "turkey", "portugal", "switzerland", "scotland", "austria", "belgium", "denmark",
 ]
+
+def _norm_txt(s: str) -> str:
+    s = (s or "").strip().lower()
+    # remove accents: División -> Division
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    # remove punctuation -> spaces, collapse spaces
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 def available_leagues_text() -> str:
@@ -105,20 +115,17 @@ def fetch_events_today():
 
 
 def _match_selected_leagues(event, selected_codes):
-    """
-    If selected_codes is empty => use DEFAULT_LEAGUES
-    Otherwise match TheSportsDB strLeague text to our code keywords.
-    """
     if not selected_codes:
         selected_codes = DEFAULT_LEAGUES
 
-    league_text = (event.get("strLeague") or "").strip().lower()
+    league_text_raw = event.get("strLeague") or ""
+    league_text = _norm_txt(league_text_raw)
     if not league_text:
         return False
 
     for code in selected_codes:
         for kw in LEAGUE_MAP.get(code, []):
-            if kw in league_text:
+            if _norm_txt(kw) in league_text:
                 return True
     return False
 
@@ -328,6 +335,7 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
 
     return _group_by_league(grouped, "RESULTS")
+
 
 
 
