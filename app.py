@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-from database import SessionLocal, User
+from database import SessionLocal, User, MessageLog
 from whatsapp import send_message
 from football_api import (
     fetch_events_today,
@@ -17,9 +17,7 @@ from football_api import (
 
 import scheduler  # starts scheduler on import
 
-# ✅ Uvicorn expects to find this variable: app
 app = FastAPI()
-
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "live_ball")
 
 
@@ -60,15 +58,28 @@ async def webhook(req: Request):
         msg = value["messages"][0]
         phone = msg["from"]
         text = (msg.get("text") or {}).get("body", "").strip().lower()
+        msg_id = msg.get("id")  # <-- for dedupe
     except Exception:
         return {"status": "could not parse message"}
 
     if not text:
-        send_message(phone, "I can only read text right now. Type *menu*.")
+        send_message(phone, "I can only read text right now. Type menu.")
         return {"status": "ok"}
 
     db = SessionLocal()
     try:
+        # =========================
+        # DEDUPE: if Meta retries the same message, ignore duplicates
+        # =========================
+        if msg_id:
+            seen = db.get(MessageLog, msg_id)
+            if seen:
+                return {"status": "duplicate_ignored"}
+
+            db.add(MessageLog(msg_id=msg_id))
+            db.commit()
+
+        # Ensure user exists
         user = db.get(User, phone)
         if not user:
             user = User(phone=phone, auto_updates=False, leagues="")
@@ -77,6 +88,7 @@ async def webhook(req: Request):
 
         selected = parse_user_leagues(user.leagues)
 
+        # Commands
         if text == "menu":
             send_message(phone, menu(user.auto_updates, selected))
 
@@ -84,7 +96,7 @@ async def webhook(req: Request):
             send_message(phone, available_leagues_text())
 
         elif text == "my leagues":
-            send_message(phone, my_leagues_text(selected))
+            send_message(phone, "Your leagues:\n" + ", ".join(selected))
 
         elif text.startswith("add "):
             code = text.replace("add ", "").strip()
@@ -97,9 +109,8 @@ async def webhook(req: Request):
         elif text == "reset leagues":
             user.leagues = ""
             db.commit()
-            send_message(phone, "✅ Reset complete. You will now receive *ALL* leagues.")
+            send_message(phone, "Reset complete. Back to default leagues.")
 
-        # ✅ New separated commands
         elif text in ("live", "scores"):
             events = fetch_events_today()
             send_message(phone, build_live_message(events, selected_codes=selected))
@@ -112,22 +123,18 @@ async def webhook(req: Request):
             events = fetch_events_today()
             send_message(phone, build_results_message(events, selected_codes=selected))
 
-        elif text == "results all":
-            events = fetch_events_today()
-            send_message(phone, build_results_message(events, selected_codes=[]))
-
         elif text in ("auto on", "autoon", "auto-on"):
             user.auto_updates = True
             db.commit()
-            send_message(phone, "✅ Auto updates enabled. I’ll send updates for your selected leagues.")
+            send_message(phone, "Auto updates enabled.")
 
         elif text in ("auto off", "autooff", "auto-off"):
             user.auto_updates = False
             db.commit()
-            send_message(phone, "❌ Auto updates disabled.")
+            send_message(phone, "Auto updates disabled.")
 
         else:
-            send_message(phone, "Type *menu* to see commands.")
+            send_message(phone, "Type menu to see commands.")
 
     finally:
         db.close()
@@ -136,64 +143,57 @@ async def webhook(req: Request):
 
 
 def parse_user_leagues(leagues_str: str):
-    # Empty => default pack (not ALL)
+    # Empty means DEFAULT pack (not world-wide)
     if not leagues_str:
         return DEFAULT_LEAGUES
 
     parts = [p.strip().lower() for p in leagues_str.split(",") if p.strip()]
     cleaned = [p for p in parts if p in LEAGUE_MAP]
-
-    # If user saved something invalid/empty, fall back to defaults
     return cleaned if cleaned else DEFAULT_LEAGUES
-
-def my_leagues_text(selected_codes):
-    return "✅ Your leagues:\n\n" + ", ".join(selected_codes)
 
 
 def add_league(user: User, code: str, db):
     code = code.lower()
     if code not in LEAGUE_MAP:
-        return "❌ Unknown league code. Type *leagues* to see valid options."
+        return "Unknown league code. Type leagues."
 
     current = set(parse_user_leagues(user.leagues))
     current.add(code)
     user.leagues = ",".join(sorted(current))
     db.commit()
-    return f"✅ Added *{code}*. Type *my leagues* to view."
+    return f"Added {code}."
 
 
 def remove_league(user: User, code: str, db):
     code = code.lower()
     current = set(parse_user_leagues(user.leagues))
     if code not in current:
-        return f"ℹ️ *{code}* wasn’t in your list. Type *my leagues*."
+        return f"{code} wasn’t in your list."
 
     current.remove(code)
     user.leagues = ",".join(sorted(current))
     db.commit()
 
     if not current:
-        return "✅ Removed. Your list is empty so you’re back to *ALL* leagues."
-    return f"✅ Removed *{code}*. Type *my leagues* to view."
+        return "Removed. Back to default leagues."
+    return f"Removed {code}."
 
 
 def menu(auto_enabled: bool, selected_codes) -> str:
-    auto_status = "ON ✅" if auto_enabled else "OFF ❌"
-    leagues_status = "ALL 🌍" if not selected_codes else ", ".join(selected_codes)
+    auto_status = "ON" if auto_enabled else "OFF"
+    leagues_status = ", ".join(selected_codes)
 
     return (
-        "⚽ Soccer Bot\n\n"
+        "Soccer Bot\n\n"
         f"Auto updates: {auto_status}\n"
         f"Leagues: {leagues_status}\n\n"
         "Commands:\n"
-        "• live (or scores) — live matches now\n"
-        "• fixtures (or today) — today’s scheduled matches\n"
-        "• results — today’s finished games\n"
-        "• results all — finished games (ignores league filter)\n"
-        "• auto on / auto off\n"
-        "• leagues — list options\n"
-        "• add <code> — subscribe\n"
-        "• remove <code> — unsubscribe\n"
-        "• my leagues — show your list\n"
-        "• reset leagues — back to ALL\n"
+        "live (or scores) — live matches now\n"
+        "fixtures (or today) — today’s fixtures\n"
+        "results — today’s finished games\n"
+        "auto on / auto off\n"
+        "leagues — list options\n"
+        "add <code> / remove <code>\n"
+        "my leagues\n"
+        "reset leagues\n"
     )
