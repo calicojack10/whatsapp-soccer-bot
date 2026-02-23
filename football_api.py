@@ -1,11 +1,14 @@
 # football_api.py
 import os
-import requests
-from datetime import datetime, timezone
 import re
 import unicodedata
+import requests
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 SPORTSDB_KEY = os.getenv("SPORTSDB_KEY", "123")
+
+NY_TZ = ZoneInfo("America/New_York")
 
 LIVE_KEYWORDS = (
     "live",
@@ -44,84 +47,65 @@ IGNORED_STATUSES = (
     "delayed",
 )
 
-# League code -> keywords to match TheSportsDB strLeague text
 LEAGUE_MAP = {
-    # Top 5 + Championship
     "epl": ["premier league", "english premier league"],
-    "laliga": ["laliga", "la liga", "laliga santander", "spanish laliga", "spain laliga", "primera division", "primera division spain", "spain primera division",],
+    "laliga": [
+        "laliga",
+        "la liga",
+        "laliga santander",
+        "primera division",
+        "spain primera division",
+        "spanish primera division",
+    ],
     "seriea": ["serie a", "italian serie a"],
     "bundesliga": ["bundesliga", "german bundesliga"],
     "ligue1": ["ligue 1", "french ligue 1"],
-    "champ": ["championship", "english championship", "efl championship"],
+    "champ": ["championship", "efl championship"],
 
-    # UEFA
-    "ucl": ["uefa champions league", "champions league"],
-    "uel": ["uefa europa league", "europa league"],
-    "uecl": ["uefa europa conference league", "europa conference league", "conference league"],
+    "ucl": ["champions league"],
+    "uel": ["europa league"],
+    "uecl": ["conference league"],
 
-    # Defaults you asked to include
-    "turkey": ["super lig", "süper lig", "turkish super lig", "turkish süper lig"],
-   "portugal": ["liga portugal", "liga portugal betclic", "primeira liga", "portuguese primeira liga","portugal primeira liga",],
-    "switzerland": ["swiss super league", "super league (switzerland)"],
-    "scotland": ["scottish premiership", "premiership (scotland)"],
-    "austria": ["austrian bundesliga", "bundesliga (austria)"],
-    "belgium": ["jupiler pro league", "belgian pro league", "pro league (belgium)"],
-    "denmark": ["danish superliga", "3f superliga", "superliga (denmark)"],
+    "turkey": ["super lig", "turkish super lig"],
+    "portugal": [
+        "liga portugal",
+        "liga portugal betclic",
+        "primeira liga",
+        "portuguese primeira liga",
+    ],
+    "switzerland": ["swiss super league"],
+    "scotland": ["scottish premiership"],
+    "austria": ["austrian bundesliga"],
+    "belgium": ["jupiler pro league"],
+    "denmark": ["danish superliga"],
 }
 
-# Default pack (used when user has no custom selection saved)
-DEFAULT_LEAGUES = [
-    "epl", "laliga", "seriea", "bundesliga", "ligue1",
-    "champ",
-    "ucl", "uel", "uecl",
-    "turkey", "portugal", "switzerland", "scotland", "austria", "belgium", "denmark",
-]
+DEFAULT_LEAGUES = list(LEAGUE_MAP.keys())
+
 
 def _norm_txt(s: str) -> str:
-    s = (s or "").strip().lower()
-    # remove accents: División -> Division
+    s = (s or "").lower().strip()
     s = unicodedata.normalize("NFKD", s)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    # remove punctuation -> spaces, collapse spaces
     s = re.sub(r"[^a-z0-9]+", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def available_leagues_text() -> str:
-    return (
-        "Available leagues (codes)\n\n"
-        "epl, laliga, seriea, bundesliga, ligue1, champ\n"
-        "ucl, uel, uecl\n"
-        "turkey, portugal, switzerland, scotland, austria, belgium, denmark\n\n"
-        "Use:\n"
-        "add epl\n"
-        "remove epl\n"
-        "my leagues\n"
-        "reset leagues"
-    )
+    return s.strip()
 
 
 def fetch_events_today():
-    """Fetch today's Soccer events (UTC date) from TheSportsDB."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_KEY}/eventsday.php"
     params = {"d": today, "s": "Soccer"}
 
     r = requests.get(url, params=params, timeout=20)
     r.raise_for_status()
-    payload = r.json() or {}
-    return payload.get("events") or []
+    return (r.json() or {}).get("events") or []
 
 
 def _match_selected_leagues(event, selected_codes):
     if not selected_codes:
         selected_codes = DEFAULT_LEAGUES
 
-    league_text_raw = event.get("strLeague") or ""
-    league_text = _norm_txt(league_text_raw)
-    if not league_text:
-        return False
+    league_text = _norm_txt(event.get("strLeague"))
 
     for code in selected_codes:
         for kw in LEAGUE_MAP.get(code, []):
@@ -130,245 +114,119 @@ def _match_selected_leagues(event, selected_codes):
     return False
 
 
-def _fmt_live_line(e) -> str:
-    home = e.get("strHomeTeam") or "Home"
-    away = e.get("strAwayTeam") or "Away"
+def _is_live(e):
+    status = _norm_txt(e.get("strStatus"))
+    if any(k in status for k in LIVE_KEYWORDS):
+        return True
+    if e.get("intHomeScore") is not None and not _is_finished(e):
+        return True
+    return False
+
+
+def _is_finished(e):
+    status = _norm_txt(e.get("strStatus"))
+    return any(k in status for k in FINISHED_KEYWORDS)
+
+
+def _is_scheduled(e):
+    status = _norm_txt(e.get("strStatus"))
+    return status == "" or any(k in status for k in SCHEDULED_KEYWORDS)
+
+
+def _fmt_live_line(e):
+    home = e.get("strHomeTeam")
+    away = e.get("strAwayTeam")
     hs = e.get("intHomeScore")
     a_s = e.get("intAwayScore")
-    status_raw = (e.get("strStatus") or "").strip()
 
-    score = ""
-    if hs is not None and a_s is not None:
-        score = f"{hs}-{a_s}"
+    score = f"{hs}-{a_s}" if hs is not None and a_s is not None else ""
 
-    # ✅ Force a clean ending label when finished
     if _is_finished(e):
-        return f"{home} {score} {away} — Finished".replace("  ", " ").strip()
+        return f"{home} {score} {away} — Finished"
 
-    # otherwise, show whatever status we have (Live / 2nd Half / HT etc.)
-    if status_raw:
-        return f"{home} {score} {away} — {status_raw}".replace("  ", " ").strip()
-
-    return f"{home} {score} {away}".replace("  ", " ").strip()
+    status = e.get("strStatus") or ""
+    return f"{home} {score} {away} — {status}".strip()
 
 
-def _fmt_result_line(e) -> str:
-    home = e.get("strHomeTeam") or "Home"
-    away = e.get("strAwayTeam") or "Away"
+def _fmt_result_line(e):
+    home = e.get("strHomeTeam")
+    away = e.get("strAwayTeam")
     hs = e.get("intHomeScore")
     a_s = e.get("intAwayScore")
-    score = ""
-    if hs is not None and a_s is not None:
-        score = f"{hs}-{a_s}"
-    return f"{home} {score} {away}".replace("  ", " ").strip()
+    score = f"{hs}-{a_s}" if hs is not None and a_s is not None else ""
+    return f"{home} {score} {away}"
 
 
-from zoneinfo import ZoneInfo
-from datetime import datetime
-
-NY_TZ = ZoneInfo("America/New_York")
-
-
-def _format_kickoff_time(e) -> str:
-    """
-    Convert TheSportsDB UTC timestamp to New York time (America/New_York).
-    Falls back safely if timestamp not present.
-    """
-
+def _format_kickoff_time(e):
     ts = e.get("strTimestamp")
-
     if ts:
         try:
-            # Ensure UTC awareness
             ts_clean = ts.replace("Z", "+00:00")
-            dt_utc = datetime.fromisoformat(ts_clean)
-
-            # Convert to NYC timezone
-            dt_ny = dt_utc.astimezone(NY_TZ)
-
+            dt = datetime.fromisoformat(ts_clean)
+            dt_ny = dt.astimezone(NY_TZ)
             return dt_ny.strftime("%-I:%M %p ET")
-
         except Exception:
             pass
 
-    # Fallback if timestamp missing
-    t = (e.get("strTime") or "").strip()
+    t = e.get("strTime")
     if t:
         try:
             dt = datetime.strptime(t, "%H:%M:%S")
             return dt.strftime("%-I:%M %p")
         except Exception:
             return t
-
     return "TBD"
 
 
-def _is_scheduled(e) -> bool:
-    status = (e.get("strStatus") or "").strip().lower()
-    return status == "" or any(k in status for k in SCHEDULED_KEYWORDS)
-
-
-def _has_score(e) -> bool:
-    return e.get("intHomeScore") is not None and e.get("intAwayScore") is not None
-
-
-def _is_live(e) -> bool:
-    """
-    Live if:
-    - status contains live keywords, OR
-    - it has a score AND it's not scheduled AND not finished/cancelled.
-    This catches games where TheSportsDB doesn't label status as 'Live' but score updates.
-    """
-    status = (e.get("strStatus") or "").strip().lower()
-
-    if any(k in status for k in LIVE_KEYWORDS):
-        return True
-
-    if _has_score(e):
-        if any(k in status for k in SCHEDULED_KEYWORDS):
-            return False
-        if any(k in status for k in FINISHED_KEYWORDS):
-            return False
-        if any(k in status for k in IGNORED_STATUSES):
-            return False
-        return True
-
-    return False
-
-
-def _is_finished(e) -> bool:
-    """STRICT: only finished keywords count as finished."""
-    status = (e.get("strStatus") or "").strip().lower()
-    return any(k in status for k in FINISHED_KEYWORDS)
-
-
-def _group_by_league(lines_by_league: dict, header: str) -> str:
-    if not lines_by_league:
+def _group(header, grouped):
+    if not grouped:
         return ""
 
     out = [header, ""]
-    for league in sorted(lines_by_league.keys()):
+    for league in sorted(grouped.keys()):
         out.append(league)
-        for line in lines_by_league[league]:
-            out.append(f"• {line}")   # <-- bullet added back
+        for line in grouped[league]:
+            out.append(f"• {line}")
         out.append("")
-
     return "\n".join(out).strip()
 
 
-def build_live_message(events, selected_codes=None, max_games: int = 12) -> str:
-    selected_codes = selected_codes or []
-    filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
-
+def build_live_message(events, selected_codes=None):
     grouped = {}
-    count = 0
-    for e in filtered:
-        if not _is_live(e):
-            continue
-        league = e.get("strLeague") or "Soccer"
-        grouped.setdefault(league, []).append(_fmt_live_line(e))
-        count += 1
-        if count >= max_games:
-            break
-
-    if not grouped:
-        return "No live matches right now for your selected leagues." if selected_codes else "No live matches right now."
-
-    return _group_by_league(grouped, "LIVE")
-
-
-def build_fixtures_message(events, selected_codes=None, max_games: int = 12) -> str:
-    selected_codes = selected_codes or []
-    filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
-
-    grouped = {}
-    count = 0
-
-    for e in filtered:
-        if not _is_scheduled(e):
-            continue
-
-        league = e.get("strLeague") or "Soccer"
-        home = e.get("strHomeTeam") or "Home"
-        away = e.get("strAwayTeam") or "Away"
-        t = _format_kickoff_time(e)
-
-        grouped.setdefault(league, []).append(f"• {t} — {home} vs {away}")
-
-        count += 1
-        if count >= max_games:
-            break
-
-    if not grouped:
-        return (
-            "No fixtures found for today for your selected leagues."
-            if selected_codes
-            else "No fixtures found for today."
-        )
-
-    lines = ["TODAY", ""]
-    for league in sorted(grouped.keys()):
-        lines.append(league)
-        for line in grouped[league]:
-            lines.append(f"  {line}")
-        lines.append("")
-
-    return "\n".join(lines).strip()
-
-
-def build_results_message(events, selected_codes=None, max_games: int = 12) -> str:
-    selected_codes = selected_codes or []
-    filtered = [e for e in events if _match_selected_leagues(e, selected_codes)]
-
-    grouped = {}
-    count = 0
-    for e in filtered:
-        if not _is_finished(e):
-            continue
-        league = e.get("strLeague") or "Soccer"
-        grouped.setdefault(league, []).append(_fmt_result_line(e))
-        count += 1
-        if count >= max_games:
-            break
-
-    if not grouped:
-        return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
-
-    return _group_by_league(grouped, "RESULTS")
-
-def debug_league_names(events, selected_codes=None, limit: int = 40) -> str:
-    """
-    Returns the list of unique league names found in today's events.
-    If selected_codes is provided, it applies the same filtering rules.
-    """
-    selected_codes = selected_codes or []
-    names = set()
-
     for e in events:
-        if not _match_selected_leagues(e, selected_codes):
-            continue
-        name = (e.get("strLeague") or "").strip()
-        if name:
-            names.add(name)
+        if _match_selected_leagues(e, selected_codes) and _is_live(e):
+            league = e.get("strLeague")
+            grouped.setdefault(league, []).append(_fmt_live_line(e))
 
-    if not names:
-        return "No league names found in today's feed."
+    return _group("LIVE", grouped) or "No live matches right now."
 
-    # Sorted for readability
-    out = ["LEAGUES (from TheSportsDB today):", ""]
-    for n in sorted(names)[:limit]:
+
+def build_results_message(events, selected_codes=None):
+    grouped = {}
+    for e in events:
+        if _match_selected_leagues(e, selected_codes) and _is_finished(e):
+            league = e.get("strLeague")
+            grouped.setdefault(league, []).append(_fmt_result_line(e))
+
+    return _group("RESULTS", grouped) or "No finished results yet today."
+
+
+def build_fixtures_message(events, selected_codes=None):
+    grouped = {}
+    for e in events:
+        if _match_selected_leagues(e, selected_codes) and _is_scheduled(e):
+            league = e.get("strLeague")
+            time_str = _format_kickoff_time(e)
+            home = e.get("strHomeTeam")
+            away = e.get("strAwayTeam")
+            grouped.setdefault(league, []).append(f"{time_str} — {home} vs {away}")
+
+    return _group("TODAY", grouped) or "No fixtures found for today."
+
+
+def debug_league_names(events):
+    names = sorted({e.get("strLeague") for e in events if e.get("strLeague")})
+    out = ["LEAGUES FROM API", ""]
+    for n in names:
         out.append(f"• {n}")
-
-    if len(names) > limit:
-        out.append("")
-        out.append(f"...and {len(names) - limit} more")
-
     return "\n".join(out)
-
-
-
-
-
-
-
-
