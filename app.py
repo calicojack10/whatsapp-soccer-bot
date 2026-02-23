@@ -178,22 +178,23 @@ def remove_league(user: User, code: str, db):
         return "Removed. Back to default leagues."
     return f"Removed {code}."
 
-
 def menu(auto_enabled: bool, selected_codes) -> str:
     auto_status = "ON" if auto_enabled else "OFF"
     leagues_status = ", ".join(selected_codes)
 
     return (
-        "Soccer Bot\n\n"
+        "Football / Soccer Bot\n\n"
         f"Auto updates: {auto_status}\n"
         f"Leagues: {leagues_status}\n\n"
         "Commands:\n"
-        "live (or scores) — live matches now\n"
-        "fixtures (or today) — today’s fixtures\n"
-        "results — today’s finished games\n"
-        "auto on / auto off\n"
-        "leagues — list options\n"
-        "add <code> / remove <code>\n"
-        "my leagues\n"
-        "reset leagues\n"
+        "• live (or scores) — live matches now\n"
+        "• fixtures (or today) — today’s fixtures\n"
+        "• results — today’s finished games\n"
+        "• auto on / auto off\n"
+        "• leagues — list options\n"
+        "• add <code> — subscribe\n"
+        "• remove <code> — unsubscribe\n"
+        "• my leagues\n"
+        "• reset leagues\n"
     )
+
