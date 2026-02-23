@@ -83,7 +83,7 @@ def available_leagues_text() -> str:
     return (
         "🏆 Available leagues (codes)\n\n"
         "epl, laliga, seriea, bundesliga, ligue1, champ, ucl, uel,\n"
-        "uecl,turkey, portugal, switzerland,\n scotland, austria, belgium, denmark \n\n"
+        "uecl, turkey, portugal, switzerland,\nscotland, austria, belgium, denmark \n\n"
         "Use:\n"
         "• add epl\n"
         "• remove epl\n"
@@ -291,6 +291,7 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         )
 
     return "🏁 Today’s Results\n\n" + "\n".join(finished[:max_games])
+
 
 
 
