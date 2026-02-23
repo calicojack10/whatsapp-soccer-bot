@@ -236,8 +236,9 @@ def _group_by_league(lines_by_league: dict, header: str) -> str:
     for league in sorted(lines_by_league.keys()):
         out.append(league)
         for line in lines_by_league[league]:
-            out.append(f"  {line}")
+            out.append(f"• {line}")   # <-- bullet added back
         out.append("")
+
     return "\n".join(out).strip()
 
 
@@ -320,5 +321,6 @@ def build_results_message(events, selected_codes=None, max_games: int = 12) -> s
         return "No finished results yet today for your selected leagues." if selected_codes else "No finished results yet today."
 
     return _group_by_league(grouped, "RESULTS")
+
 
 
