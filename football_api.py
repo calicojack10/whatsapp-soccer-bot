@@ -9,6 +9,52 @@ from zoneinfo import ZoneInfo
 SPORTSDB_KEY = os.getenv("SPORTSDB_KEY", "123")
 NY_TZ = ZoneInfo("America/New_York")
 
+def _kickoff_dt_utc(e):
+    """
+    Returns kickoff datetime in UTC if available, else None.
+    Uses strTimestamp when present.
+    """
+    ts = (e.get("strTimestamp") or "").strip()
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _kickoff_dt_ny(e):
+    dt_utc = _kickoff_dt_utc(e)
+    if not dt_utc:
+        return None
+    try:
+        return dt_utc.astimezone(NY_TZ)
+    except Exception:
+        return None
+
+
+def _today_ny_date():
+    return datetime.now(NY_TZ).date()
+
+
+def _event_is_today_ny(e) -> bool:
+    """
+    Decide “today” using New York local date (Brooklyn).
+    Prefer timestamp->NY date. Fallback to dateEvent.
+    """
+    dt_ny = _kickoff_dt_ny(e)
+    if dt_ny:
+        return dt_ny.date() == _today_ny_date()
+
+    # fallback
+    d = (e.get("dateEvent") or "").strip()
+    if not d:
+        return False
+    try:
+        return datetime.strptime(d, "%Y-%m-%d").date() == _today_ny_date()
+    except Exception:
+        return False
+
 LIVE_KEYWORDS = (
     "live",
     "in play",
@@ -296,3 +342,4 @@ def debug_league_names(events, limit: int = 60) -> str:
         out.append("")
         out.append(f"...and {len(names) - limit} more")
     return "\n".join(out)
+
